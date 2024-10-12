@@ -1,14 +1,19 @@
 // frontend/src/index.ts
+const GAS_TYPES: Record<
+  number,
+  { name: string; density: number; color: string }
+> = {
+  0: { name: "Empty", density: 0, color: "#ffffff" },
+  1: { name: "Gas 1", density: 1, color: "#0000ff" },
+  2: { name: "Gas 2", density: 2, color: "#00ff00" },
+};
+
 interface Cell {
-  gasType: number;
-  density: number;
+  gasName: string;
+  gasColor: string;
 }
 
 type Grid = Cell[][];
-
-const GAS_TYPES: Record<number, { name: string; color: string }> = {
-  0: { name: "Empty", color: "white" },
-};
 
 class GridDisplay {
   private gridElement: HTMLElement;
@@ -33,7 +38,7 @@ class GridDisplay {
   private createCellElement(cell: Cell): HTMLElement {
     const element = document.createElement("div");
     element.className = "cell";
-    element.style.backgroundColor = GAS_TYPES[cell.gasType].color;
+    element.style.backgroundColor = cell.gasColor;
     return element;
   }
 }
@@ -53,7 +58,11 @@ async function updateGrid() {
 }
 
 // Update the grid every second
-setInterval(updateGrid, 1000);
+setInterval(updateGrid, 100);
 
 // Initial update
 updateGrid();
+
+document.getElementById("reset-button")?.addEventListener("click", () => {
+  fetch("http://localhost:3000/reset", { method: "POST" });
+});
