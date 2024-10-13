@@ -33,7 +33,13 @@ interface Cell {
   gasColor: string;
 }
 
-type Grid = Cell[][];
+interface CellWithCoordinates {
+  cell: Cell;
+  x: number;
+  y: number;
+}
+
+type Grid = CellWithCoordinates[];
 
 const GAS_TYPES: Record<
   number,
@@ -52,28 +58,9 @@ const GAS_TYPES: Record<
   // 10: { name: "Gas 10", density: 10, color: "#800000" },
 };
 
-function createGrid(width: number, height: number): Grid {
-  return Array(height)
-    .fill(null)
-    .map(() =>
-      Array(width)
-        .fill(null)
-        .map(() => {
-          const gasTypeIndex = Math.floor(
-            Math.random() * Object.keys(GAS_TYPES).length
-          );
-          const gasType = GAS_TYPES[gasTypeIndex];
-          return {
-            gasName: gasType.name,
-            gasColor: gasType.color,
-          };
-        })
-    );
-}
-
 async function getGridFromRedis(): Promise<Grid> {
   const gridJson = await redis.get("gasGrid");
-  return gridJson ? JSON.parse(gridJson) : createGrid(100, 100);
+  return gridJson ? JSON.parse(gridJson) : createGrid(200, 200);
 }
 
 async function saveGridToRedis(grid: Grid): Promise<void> {
@@ -108,6 +95,7 @@ connectToRedis()
 app.get("/grid", async (req, res) => {
   try {
     const grid = await getGridFromRedis();
+    console.log(grid);
     res.json(grid);
     logger.info("Grid sent to client");
   } catch (error) {
@@ -119,10 +107,12 @@ app.get("/grid", async (req, res) => {
 app.post("/simulate", async (req, res) => {
   try {
     let grid = await getGridFromRedis();
-    grid = simulateGrid(grid);
-    await saveGridToRedis(grid);
-    res.json(grid);
-    logger.debug("Simulation completed and grid sent back");
+    logger.info("Simulating grid", { length: grid.length });
+    let newGrid = simulateGrid(grid);
+    let onlyChanges = getChanges(grid, newGrid);
+    logger.info("Changes", { length: onlyChanges.length });
+    await saveGridToRedis(newGrid);
+    res.json(onlyChanges.length > 0 ? onlyChanges : grid);
   } catch (error) {
     logger.error("Error during simulation", { error });
     res.status(500).json({ error: "Internal Server Error" });
@@ -142,28 +132,52 @@ function getGasTypeDensity(gasName: string): number {
 }
 
 function simulateGrid(grid: Grid): Grid {
-  const newGrid = JSON.parse(JSON.stringify(grid)); // Create a deep copy of the grid
-
   for (let i = 0; i < grid.length; i++) {
-    for (let j = 0; j < grid[i].length; j++) {
-      const cell = grid[i][j];
-      const cellDensity = getGasTypeDensity(cell.gasName);
-      const aboveDensity = getGasTypeDensity(grid[i - 1]?.[j]?.gasName);
-      const belowDensity = getGasTypeDensity(grid[i + 1]?.[j]?.gasName);
-
-      if (i > 0 && aboveDensity > cellDensity) {
-        if (Math.random() < 0.5 || true) {
-          newGrid[i][j] = grid[i - 1][j];
-          newGrid[i - 1][j] = cell;
-        }
-      } else if (i < grid.length - 1 && belowDensity < cellDensity) {
-        if (Math.random() < 0.5 || true) {
-          newGrid[i][j] = grid[i + 1][j];
-          newGrid[i + 1][j] = cell;
-        }
-      }
+    const cellWithCoords = grid[i];
+    const cellDensity = getGasTypeDensity(cellWithCoords.cell.gasName);
+    const aboveDensity = grid.find((row) => row.y === cellWithCoords.y - 1)
+      ?.cell.gasName;
+    const belowDensity = grid.find((row) => row.y === cellWithCoords.y + 1)
+      ?.cell.gasName;
+    if (aboveDensity && getGasTypeDensity(aboveDensity) > cellDensity) {
+      grid[i].y = grid[i].y - 1;
+    }
+    if (belowDensity && getGasTypeDensity(belowDensity) < cellDensity) {
+      grid[i].y = grid[i].y + 1;
     }
   }
 
-  return newGrid;
+  return grid;
+}
+
+function createGrid(width: number, height: number): Grid {
+  const grid: Grid = [];
+  for (let i = 0; i < height; i++) {
+    for (let j = 0; j < width; j++) {
+      const gasTypeIndex = Math.floor(
+        Math.random() * Object.keys(GAS_TYPES).length
+      );
+      const gasType = GAS_TYPES[gasTypeIndex];
+      grid.push({
+        cell: { gasName: gasType.name, gasColor: gasType.color },
+        x: i,
+        y: j,
+      });
+    }
+  }
+  return grid;
+}
+
+function getChanges(oldGrid: Grid, newGrid: Grid): CellWithCoordinates[] {
+  const changes: CellWithCoordinates[] = [];
+  console.log(oldGrid.length, newGrid.length);
+  if (oldGrid.length !== newGrid.length) {
+    return newGrid;
+  }
+  for (let i = 0; i < oldGrid.length; i++) {
+    if (oldGrid[i].y !== newGrid[i].y) {
+      changes.push(newGrid[i]);
+    }
+  }
+  return changes;
 }
